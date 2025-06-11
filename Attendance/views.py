@@ -3,11 +3,191 @@ from django.utils import timezone
 from django.http import JsonResponse
 from datetime import time, timedelta
 import json
+#MDB파일 관련
+from django.conf import settings
+import subprocess
+import os
+from io import StringIO
+import pandas as pd
 #모델가져오기
 from .models import Attendance
 from django.core.management.base import BaseCommand
 from django.contrib.auth import get_user_model
 # Create your views here.
+
+#MDB파일 출근데이터 기록하기
+def mdbfile_record(request):
+    if request.method == 'POST':
+        if 'file' not in request.FILES:
+            return JsonResponse({'success':False, 'message': '파일이 없습니다.'})
+
+        #파일가져오기
+        uploaded_file = request.FILES['file']
+
+        #파일 저장 경로 설정
+        save_path = os.path.join(settings.MEDIA_ROOT, uploaded_file.name)
+
+        #파일저장
+        with open(save_path, 'wb+') as destination:
+            for chunk in uploaded_file.chunks():
+                destination.write(chunk)
+
+        print(f"파일이 {save_path}에 저장되었습니다.")
+
+        try:
+            # 카드번호와 사원번호가 매칭된 엑셀파일 가져오기
+            excel_path = os.path.join(settings.MDEIA_ROOT, 'card_idnumber.xlsx')
+            #엑셀파일에서 데이터 읽기
+            excel_df = pd.read_excel(excel_path, engine='openpyxl')
+
+            #MDB파일 CSV로 변환
+            table_name = 'attendancetime'
+            command = ['mdb-export', save_path, table_name]
+            result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+            if result.returncode != 0:
+                print(f"Error: {result.stderr}")
+                return JsonResponse({'success': False, 'message': f'명령 실행 중 오류 발생: {result.stderr}'})
+
+            #데이터 프레임 읽기
+            data = StringIO(result.stdout)
+            df = pd.read_csv(data)
+
+            #필요한 필드 선택
+            required_fields = ['e_date', 'e_time', 'e_id', 'e_name', 'e_mode']
+            #필드 누락확인
+            for field in required_fields:
+                if field not in df.columns:
+                    return JsonResponse({'success': False, 'message': f'필드{field}가 누락되었습니다.'})
+
+            #데이터프레임에서 필요한 열 추출
+            df_filterd = df[required_fields].copy()
+            three_days_ago = datetime.now() - timedelta(days=3)
+            three_days_ago_str = three_days_ago.date()
+
+            #날짜와 시간을 변환해서 저장
+            df_filterd.loc[:,'e_date'] = pd.to_datetime(df_filterd['e_date'],format="%Y%m%d",errors='coerce').dt.date
+            #삽입하는 데이터를 현재날짜에서 3일전까지의 데이터만 넣는걸로 설정 예) 현날짜가 11일이면 8일부터 삽입
+            df_filterd = df_filterd[df_filterd['e_date'] >= three_days_ago_str]
+            #시간을 분까지만 표시
+            df_filterd.loc[:,'e_time'] = pd.to_datetime(df_filterd['e_time'], format="%H%M%S",errors='coerce').dt.rount('min').dt.time
+
+            #결측값 제거
+            df_filterd.dropna(subset=['e_date','e_time'], inplace=True)
+
+            #날짜,시간을 기준으로 정렬
+            df_filterd = df_filterd.sort_values(by=['e_date','e_time'],ascending=[True, True])
+
+            for i, row in df_filterd.iterrows():
+                #e_name이 Nan이면 넘어가기
+                if pd.isna(row['e_name']):
+                    continue
+                check_date = row['e_date']
+                employee_number = row['e_id']
+                name = row['e_name']
+                check_time = row['e_time']
+                check_mode = row['e_mode']
+                #엑셀에서 카드번호와 매칭되는 사원번호 가져오기
+                matching_rows = excel_df[excel_df['카드ID'] == employee_number]
+                if not matching_rows.empty:
+                    employee_number = matching_rows['사원번호'].values[0]
+
+                #등록시간 변환
+                check_combine_time = datetime.combine(check_date, check_time)
+
+                if check_mode == 1 or check_mode == 2:
+                    if check_mode == 1:
+                        #출근생성
+                        attendance_record = Attendance.objects.filter(
+                            name = name,
+                            employee_number = employee_number,
+                            check_date = check_date,
+                            check_in_time = check_time,
+                        )
+                        if not attendance_record.exists():
+                            #check_date의 데이터가 없기에 새로 생성
+                            #데이터조회떄 created_time을 참고하기떄문에 created_time에 카드가 찍힌날짜와 시간 대입
+                            Attendance.objects.create(
+                                name = name,
+                                employee_number = employee_number,
+                                check_date = check_date,
+                                check_in_time = check_time,
+                                check_in_place_name = "본사",
+                                check_in_location = "본사",
+                                check_in_type = "카드",
+                                created_time = check_combine_time
+                            )
+                        else:
+                            #이미 생성된 데이터이기에 넘어갑니다.
+                            continue
+                    elif check_mode == 2:
+                        attendance_record = Attendance.objects.filter(
+                            name = name,
+                            employee_number = employee_number,
+                            check_date = check_date,
+                        )
+                        if attendance_record.exists():
+                            #해당날짜의 출근데이터가 있음
+                            #여러개인지 확인
+                            if len(attendance_record) >= 2:
+                                match_attendance = attendance_record.filter(check_out_time = check_time).first()
+                                if match_attendance:
+                                    continue
+                                else:
+                                    #출근기록이 2개이상이므로 정렬한후 최근값을 가져온다
+                                    recent_attendance = None
+                                    for i in match_attendance.order_by('-check_in_time'):
+                                        if i.check_in_time < check_time:
+                                            recent_attendance = i
+                                            break
+                                    if recent_attendance.business_start_time == time(0,0,0):
+                                        #출장출발기록이 없으면 정상퇴근처리
+                                        recent_attendance.check_out_time = check_time
+                                        recent_attendance.check_out_place_name = "본사"
+                                        recent_attendance.check_out_location = "본사"
+                                        recent_attendance.check_type = "카드"
+                                        recent_attendance.save()
+                                    else:
+                                        #출장을하고 카드로 퇴근을 했기에 출장복귀에 퇴근기록을 넣음
+                                        recent_attendance.check_out_time = check_time
+                                        recent_attendance.business_end_time = check_time
+                                        recent_attendance.check_out_place_name = "본사"
+                                        recent_attendance.check_out_location = "본사"
+                                        recent_attendance.check_type = "카드"
+                                        recent_attendance.save()
+                            else:
+                                #해당날짜에 출퇴근기록이 1개라면 바로값을 넣는다.
+                                recent_attendance = recent_attendance[0]
+                                if recent_attendance.business_start_time == time(0, 0, 0):
+                                    #출장출발이 없는 정상퇴근
+                                    recent_attendance.check_out_time = check_time
+                                    recent_attendance.check_out_place_name = "본사"
+                                    recent_attendance.check_out_location = "본사"
+                                    recent_attendance.check_type = "카드"
+                                    recent_attendance.save()
+                                else:
+                                    #출장출발이 있어 복귀시간에 퇴근시간을 넣음
+                                    recent_attendance.check_out_time = check_time
+                                    recent_attendance.business_end_time = check_time
+                                    recent_attendance.check_out_place_name = "본사"
+                                    recent_attendance.check_out_location = "본사"
+                                    recent_attendance.check_out_type = "카드"
+                                    recent_attendance.save()
+                else:
+                    #출근은 1 퇴근은 2 그외에는 쓸모없으니 패스한다
+                    continue
+
+            return JsonResponse({'success': True, 'message': 'MDB파일로 출퇴근 처리 완료'})
+        except Exception as e:
+            return JsonResponse({'success': False, 'message': f'MDB 파일 처리하는중 오류발생'})
+    else:
+        return JsonResponse({'success': False, 'message': "잘못된 요청입니다."})
+
+
+
+
+
+
 
 def business_start(request):
     if request.method == "POST":
@@ -97,7 +277,8 @@ def check_in(request):
                     check_date = check_date,
                     check_in_time = check_in_time,
                     check_in_place_name = check_in_place_name,
-                    check_in_location = check_in_location
+                    check_in_location = check_in_location,
+                    check_in_type = "웹"
                 )
                 return JsonResponse({'success': True, 'message': f'{check_in_time}에 출근처리 되었습니다.'})
             else:
@@ -105,6 +286,7 @@ def check_in(request):
                 business_check.check_in_time = check_in_time
                 business_check.check_in_place_name = check_in_place_name
                 business_check.check_in_location = check_in_location
+                business_check.check_in_type = "웹"
                 business_check.save()
                 return JsonResponse({'success': True, 'message': f'{check_in_time}에 출근처리 되었습니다.'})
         #출근데이터생성
@@ -116,7 +298,8 @@ def check_in(request):
                 check_date = check_date,
                 check_in_time = check_in_time,
                 check_in_place_name = check_in_place_name,
-                check_in_location = check_in_location
+                check_in_location = check_in_location,
+                check_in_type = "웹"
             )
             #출근메시지 반환
             return JsonResponse({'success': True, 'message': f'{check_in_time}에 출근처리 되었습니다.'})
@@ -145,7 +328,8 @@ def check_out(request):
                 check_date = check_date,
                 check_out_time = check_out_time,
                 check_out_place_name = check_out_place_name,
-                check_out_location = check_out_location
+                check_out_location = check_out_location,
+                check_out_type = "웹"
             )
             return JsonResponse({'success': True, 'message': f'{check_out_time}에 퇴근처리가 되었습니다.'})
 
@@ -160,6 +344,7 @@ def check_out(request):
                     recent_attendance.check_out_time = check_out_time
                     recent_attendance.check_out_place_name = check_out_place_name
                     recent_attendance.check_out_location = check_out_location
+                    recent_attendance.check_out_type = "웹"
                     recent_attendance.save()
                     check_out_time = check_out_time.strftime("%H:%M")
                     return JsonResponse({'success': True, 'message': f'{check_out_time}에 퇴근처리 되었습니다.'})
@@ -171,7 +356,8 @@ def check_out(request):
                         check_date=check_date,
                         check_out_time=check_out_time,
                         check_out_place_name=check_out_place_name,
-                        check_out_location=check_out_location
+                        check_out_location=check_out_location,
+                        check_out_type="웹"
                     )
                     return JsonResponse({'success': True, 'message': f'{check_out_time}에 퇴근처리 되었습니다.'})
             else:
@@ -179,6 +365,7 @@ def check_out(request):
                 recent_attendance.check_out_time = check_out_time
                 recent_attendance.check_out_place_name = check_out_place_name
                 recent_attendance.check_out_location = check_out_location
+                recent_attendance.check_out_type = "웹"
                 recent_attendance.save()
                 return JsonResponse({'success': True, 'message': f'{check_out_time}에 퇴근처리가 되었습니다.'})
         else:
@@ -189,6 +376,7 @@ def check_out(request):
                 check_date=check_date,
                 check_out_time=check_out_time,
                 check_out_place_name=check_out_place_name,
-                check_out_location=check_out_location
+                check_out_location=check_out_location,
+                check_out_type = "웹"
             )
             return JsonResponse({'success': True, 'message': f'{check_out_time}에 퇴근처리가 되었습니다.'})

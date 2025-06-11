@@ -16,6 +16,8 @@ class Attendance(models.Model):
     business_end_place = models.CharField(max_length=20,default="")
     check_in_location = models.CharField(max_length=30,default="")
     check_out_location = models.CharField(max_length=30,default="")
+    check_in_type = models.CharField(max_length=20,default="")
+    check_out_type = models.CharField(max_length=20,default="")
     created_time = models.TimeField(default=timezone.now)
 
     def __str__(self):
