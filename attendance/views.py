@@ -9,10 +9,11 @@ import subprocess
 import os
 from io import StringIO
 import pandas as pd
+#출퇴근관련
+from django.db.models import Q
 #모델가져오기
 from .models import Attendance
-from django.core.management.base import BaseCommand
-from django.contrib.auth import get_user_model
+from ..user.models import User
 # Create your views here.
 
 #MDB파일 출근데이터 기록하기
@@ -188,7 +189,7 @@ def mdbfile_record(request):
 
 
 
-
+#출장출발
 def business_start(request):
     if request.method == "POST":
         data = json.loads(request.body)
@@ -210,6 +211,7 @@ def business_start(request):
         return JsonResponse({'success': True, 'message': f'{business_start_time}에 출장출발 처리 되었습니다.'})
     else:
         return JsonResponse({'success': False, 'message': "잘못된 요청입니다."})
+#출장복귀
 def business_end(request):
     if request.method == 'POST':
         data = json.loads(request.body)
@@ -252,7 +254,7 @@ def business_end(request):
     else:
         return JsonResponse({'success': False, 'message': "잘못된 요청입니다."})
 
-
+#출근
 def check_in(request):
     if request.method == "POST":
         data = json.loads(request.body)
@@ -304,7 +306,7 @@ def check_in(request):
             #출근메시지 반환
             return JsonResponse({'success': True, 'message': f'{check_in_time}에 출근처리 되었습니다.'})
 
-
+#퇴근
 def check_out(request):
     if request.method == 'POST':
         data = json.loads(request.body)
@@ -380,3 +382,56 @@ def check_out(request):
                 check_out_type = "웹"
             )
             return JsonResponse({'success': True, 'message': f'{check_out_time}에 퇴근처리가 되었습니다.'})
+
+
+#직원 자기출퇴근조회
+def employer_self_attend_check(request):
+    if request.method == "POST":
+        data = json.loads(request.body)
+        name = data.get('name','')
+        employee_number = data.get('employee_number')
+        code = User.objects.filter(name=name, employee_number=employee_number).first()
+        code = code.department_code
+        end_date =  timezone.now(),date() + timedelta(days=1)
+        start_date = end_date - timedelta(days=7)
+
+        #코드를 통해 임직원의 직책을 알고 직책에 따라 조회할수있는 범위가 달라짐
+        #예) 사업1팀 팀장은 팀장본인것은 물런이고 사업팀 직원들의 출퇴근도 조회가능
+        if code == 200:
+            query = Q(department_code__in=[200,210,211,300])
+        elif code == 210:
+            query = Q(department_code__in=[210,211])
+        elif code == 300:
+            query = Q(department_code__in=[300,310,311,320,321])
+        elif code == 310:
+            query = Q(department_code__in=[310,311])
+        elif code == 320:
+            query = Q(department_code__in=[320,321])
+        elif code == 400:
+            query = Q(department_code_in=[400,410,411])
+        elif code == 410:
+            query = Q(department_code_in=[410,411])
+        else:
+            query = Q()#조건이 없으면 빈쿼리
+        excluded_fields = ['business_start_place', 'business_end_place']
+        data = []
+        if query:
+            users = User.objects.filter(query)
+            for user in users:
+                attendance_data = Attendance.objects.filter(name=user.name,employee_number=user.employee_number,check_date__range=[start_date, end_date]).order_by('-check_date', '-created_time').values()
+                for record in attendance_data:
+                    filtered_record = {}
+                    for k, v in record.items():
+                        if k not in excluded_fields:
+                            filtered_record[k] = v
+                    data.append(filtered_record)
+        else:
+            attendance_data = Attendance.objects.filter(check_date__range=[start_date, end_date]).order_by('-check_date','-created_time').values()
+            for record in attendance_data:
+                filterd_record = {}
+                for k,v in record.items():
+                    if k not in excluded_fields:
+                        filterd_record[k] = v
+                data.append(filterd_record)
+
+        return JsonResponse(data,safe=False)
