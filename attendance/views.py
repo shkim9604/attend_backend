@@ -305,7 +305,8 @@ def check_in(request):
             )
             #출근메시지 반환
             return JsonResponse({'success': True, 'message': f'{check_in_time}에 출근처리 되었습니다.'})
-
+    else:
+        return JsonResponse({'success': False, 'message': "잘못된 요청입니다."})
 #퇴근
 def check_out(request):
     if request.method == 'POST':
@@ -382,10 +383,11 @@ def check_out(request):
                 check_out_type = "웹"
             )
             return JsonResponse({'success': True, 'message': f'{check_out_time}에 퇴근처리가 되었습니다.'})
-
+    else:
+        return JsonResponse({'success': False, 'message': "잘못된 요청입니다."})
 
 #직원 자기출퇴근조회
-def employer_self_attend_check(request):
+def employee_self_attend_check(request):
     if request.method == "POST":
         data = json.loads(request.body)
         name = data.get('name','')
@@ -435,3 +437,43 @@ def employer_self_attend_check(request):
                 data.append(filterd_record)
 
         return JsonResponse(data,safe=False)
+    else:
+        return JsonResponse({'success': False, 'message': '잘못된 요청입니다.'})
+
+#관리자 출퇴근조회
+def admin_get_employee_attendance(request):
+    if request.method == 'GET':
+        end_date = timezone.now().date() + timedelta(days=1)
+        start_date = end_date - timedelta(days=7)
+        attendance_data = Attendance.objects.filter(check_date__range=[start_date,end_date]).order_by('-created_time').values()
+        return JsonResponse(list(attendance_data),safe=False)
+    else:
+        return JsonResponse({'success': False, 'message': '잘못된 요청입니다.'})
+
+#관리자 직원 출퇴근상세조회
+def admin_get_employee_attendance_detail(request):
+    if request.method == 'POST':
+        data = json.loads(request.body)
+        name = data.get('name','')
+        start_date = data.get('start_date','')
+        end_date = data.get('end_date','')
+        if start_date == "" and end_date == "":
+            #시작날짜와 끝날짜가 비어있으므로 7일치의 데이터를 가져온다.
+            end_date = timezone.now().date() + timedelta(days=1)
+            start_date = end_date - timedelta(days=7)
+            if name == "전직원":
+                attendance_data = Attendance.objects.filter(check_date__range=[start_date,end_date]).order_by('-created_time').values()
+                return JsonResponse(list(attendance_data), safe=False)
+            else:
+                #이름이 있으니 해당직원의 데이터를 가져온다.
+                attendance_data = Attendance.objects.filter(name=name, check_date__range=[start_date, end_date]).order_by('-created_time').values()
+                return JsonResponse(list(attendance_data), safe=False)
+        else:
+            #날짜가 있으므로 해당날짜에 해당하는 데이터를 가져온다.
+            if name == "전직원":
+                attendance_data = Attendance.objects.filter(check_date__range=[start_date,end_date]).order_by('-created_time').values()
+                return JsonResponse(list(attendance_data), safe=False)
+            attendance_data = Attendance.objects.filter(name=name, check_date__range=[start_date, end_date]).order_by('-created_time').values()
+            return JsonResponse(list(attendance_data), safe=False)
+    else:
+        return JsonResponse({'success': False, 'message': '잘못된 요청입니다.'})
