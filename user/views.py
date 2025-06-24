@@ -1,7 +1,7 @@
 import json
-
 from django.shortcuts import render
 from django.http import JsonResponse
+from rest_framework_simplejwt.tokens import RefreshToken
 from .models import User
 # Create your views here.
 
@@ -40,7 +40,14 @@ def Login(request):
         user = User.objects.get(name=name, employee_number=employee_number)
         if user is not None:
             #사용자 있음
-            return JsonResponse({'success': True, 'name': user.name, 'employee_number': user.employee_number})
+            refresh = RefreshToken.for_user(user)
+            return JsonResponse({
+                'success': True,
+                'access': str(refresh.access_token),
+                'refresh': str(refresh),
+                'name': user.name,
+                'employee_number': user.employee_number
+            })
         else:
             #사용자 없음
             return JsonResponse({'success': False, 'message': "로그인 실패\n이름이나 사원번호를 확인해주세요."})

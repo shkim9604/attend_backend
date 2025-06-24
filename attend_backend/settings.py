@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/4.1/ref/settings/
 """
 
 from pathlib import Path
+from datetime import timedelta
 import os
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -40,8 +41,26 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'user',
     'attendance',
-    'corsheaders'
+    'corsheaders',
+    'rest_framework',
+    'rest_framework_simplejwt'
 ]
+
+# JWT 인증 클래스를 기본 인증으로 설정
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': (
+        'rest_framework_simplejwt.authentication.JWTAuthentication',
+    )
+}
+
+SIMPLE_JWT = {
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=10),   # access 토큰 유효시간
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),      # refresh 토큰 유효시간
+    'ROTATE_REFRESH_TOKENS': False,                   # True로 하면 refresh 시 새 refresh 발급
+    'BLACKLIST_AFTER_ROTATION': False,
+    'ALGORITHM': 'HS256',
+    'SIGNING_KEY': SECRET_KEY,                        # 기본값은 settings.py의 SECRET_KEY
+}
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
