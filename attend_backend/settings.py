@@ -55,7 +55,7 @@ REST_FRAMEWORK = {
 
 SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(minutes=10),   # access 토큰 유효시간
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),      # refresh 토큰 유효시간
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=0),      # refresh 토큰 유효시간
     'ROTATE_REFRESH_TOKENS': False,                   # True로 하면 refresh 시 새 refresh 발급
     'BLACKLIST_AFTER_ROTATION': False,
     'ALGORITHM': 'HS256',

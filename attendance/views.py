@@ -3,6 +3,8 @@ from django.utils import timezone
 from django.http import JsonResponse
 from django.http import HttpResponse
 from datetime import time, timedelta
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
 import json
 #MDB파일 관련
 from django.conf import settings
@@ -190,74 +192,68 @@ def mdbfile_record(request):
         return JsonResponse({'success': False, 'message': "잘못된 요청입니다."})
 
 
-
-
-
-
 #출장출발
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
 def business_start(request):
-    if request.method == "POST":
-        data = json.loads(request.body)
-        name = data.get('name','')
-        employee_number = data.get('employee_number','')
-        check_date = data.get('check_date','')
-        business_start_time = data.get('buiness_start_time','')
-        business_start_place= data.get('place_name','')
-        #날짜,시간 변형
-        check_date = datetime.strptime(check_date,"%Y-%m-%d").date()
-        business_start_time = datetime.strptime(business_start_time, "%H:%M").time()
-        Attendance.objects.create(
-            name = name,
-            employee_number = employee_number,
-            check_date = check_date,
-            business_start_time = business_start_time,
-            business_start_place = business_start_place,
-        )
-        return JsonResponse({'success': True, 'message': f'{business_start_time}에 출장출발 처리 되었습니다.'})
-    else:
-        return JsonResponse({'success': False, 'message': "잘못된 요청입니다."})
+    user = request.user #토큰에서 인증된 사용자
+    data = request.data
+    check_date = data.get('check_date','')
+    business_start_time = data.get('buiness_start_time','')
+    business_start_place= data.get('place_name','')
+    #날짜,시간 변형
+    check_date = datetime.strptime(check_date,"%Y-%m-%d").date()
+    business_start_time = datetime.strptime(business_start_time, "%H:%M").time()
+    Attendance.objects.create(
+        name = user.name,
+        employee_number = user.employee_number,
+        check_date = check_date,
+        business_start_time = business_start_time,
+        business_start_place = business_start_place,
+    )
+    return JsonResponse({'success': True, 'message': f'{business_start_time}에 출장출발 처리 되었습니다.'})
+
 #출장복귀
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
 def business_end(request):
-    if request.method == 'POST':
-        data = json.loads(request.body)
-        name = data.get('name','')
-        employee_number = data.get('employee_number', '')
-        check_date = data.get('check_date', '')
-        business_end_time = data.get('business_end_time','')
-        business_end_place = data.get('place_name','')
-        #날짜,시간 형태변경
-        check_date = datetime.strptime(check_date,"%Y-%m-%d").date()
-        business_end_time = datetime.strptime(business_end_time, "%H:%M").time()
-        #가장최근기록에 복귀 데이터 넣기
-        recent_attendance = Attendance.objects.filter(name=name,employee_number=employee_number).order_by('-check_date','-created_time').first()
-        #예)17일출장출발 18일 새벽복귀
-        if recent_attendance.check_date != check_date:
-            if recent_attendance.check_out_time == time(0,0,0):
-                #최근기록에 퇴근이 없을시 퇴근을 먼저하라는 메시지를 반환한다.
-                return JsonResponse({'success': False, 'message': '퇴근처리가 되있지않습니다.\n퇴근부터 해주시길 바랍니다.'})
-            else:
-                #퇴근이 되어있을경우 그 기록에 복귀기록을 씌운다.
-                #날짜가 다른복귀이기에 퇴근처럼 24초를 더해서 처리한다.
-                business_end_time = datetime.combine(check_date,business_end_time) + timedelta(seconds=24)
-                business_end_time = business_end_time.time()
-                recent_attendance.business_end_time = business_end_time
-                recent_attendance.business_end_place = business_end_place
-                recent_attendance.save()
-                return JsonResponse({'success': True, 'message': f'{business_end_time}에 출장복귀처리가 되었습니다.'})
+    user = request.user #토큰에서 인증된 사용자
+    data = request.data
+    check_date = data.get('check_date', '')
+    business_end_time = data.get('business_end_time','')
+    business_end_place = data.get('place_name','')
+    #날짜,시간 형태변경
+    check_date = datetime.strptime(check_date,"%Y-%m-%d").date()
+    business_end_time = datetime.strptime(business_end_time, "%H:%M").time()
+    #가장최근기록에 복귀 데이터 넣기
+    recent_attendance = Attendance.objects.filter(name=user.name,employee_number=user.employee_number).order_by('-check_date','-created_time').first()
+    #예)17일출장출발 18일 새벽복귀
+    if recent_attendance.check_date != check_date:
+        if recent_attendance.check_out_time == time(0,0,0):
+            #최근기록에 퇴근이 없을시 퇴근을 먼저하라는 메시지를 반환한다.
+            return JsonResponse({'success': False, 'message': '퇴근처리가 되있지않습니다.\n퇴근부터 해주시길 바랍니다.'})
         else:
-            #날짜가 같으면 당일 출장복귀이기에 최근기록에 복귀기록을 씌운다.
-            if recent_attendance.check_out_time == time(0,0,0):
-                return JsonResponse({'success': False, 'message': '퇴근처리가 되있지않습니다.\n퇴근부터 해주시길 바랍니다.'})
-            if recent_attendance.business_end_time != time(0,0,0):
-                #최근기록의 복귀시간이 00:00이 아니면 복귀를 했기에 복귀처리된시간을 반환해준다.
-                return JsonResponse({'success': False, 'message': f'{recent_attendance.check_date}일 {recent_attendance.business_end_time}자로 복귀처리가되었습니다.'})
-            #두조건을 통과하면 당일복귀처리를 한다.
+            #퇴근이 되어있을경우 그 기록에 복귀기록을 씌운다.
+            #날짜가 다른복귀이기에 퇴근처럼 24초를 더해서 처리한다.
+            business_end_time = datetime.combine(check_date,business_end_time) + timedelta(seconds=24)
+            business_end_time = business_end_time.time()
             recent_attendance.business_end_time = business_end_time
             recent_attendance.business_end_place = business_end_place
             recent_attendance.save()
-            return JsonResponse({'success': True, 'message': f'{business_end_time}에 출장복귀 처리 되었습니다.'})
+            return JsonResponse({'success': True, 'message': f'{business_end_time}에 출장복귀처리가 되었습니다.'})
     else:
-        return JsonResponse({'success': False, 'message': "잘못된 요청입니다."})
+        #날짜가 같으면 당일 출장복귀이기에 최근기록에 복귀기록을 씌운다.
+        if recent_attendance.check_out_time == time(0,0,0):
+            return JsonResponse({'success': False, 'message': '퇴근처리가 되있지않습니다.\n퇴근부터 해주시길 바랍니다.'})
+        if recent_attendance.business_end_time != time(0,0,0):
+            #최근기록의 복귀시간이 00:00이 아니면 복귀를 했기에 복귀처리된시간을 반환해준다.
+            return JsonResponse({'success': False, 'message': f'{recent_attendance.check_date}일 {recent_attendance.business_end_time}자로 복귀처리가되었습니다.'})
+        #두조건을 통과하면 당일복귀처리를 한다.
+        recent_attendance.business_end_time = business_end_time
+        recent_attendance.business_end_place = business_end_place
+        recent_attendance.save()
+        return JsonResponse({'success': True, 'message': f'{business_end_time}에 출장복귀 처리 되었습니다.'})
+
 
 #출근
 def check_in(request):
