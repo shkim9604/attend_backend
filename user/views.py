@@ -46,7 +46,8 @@ def Login(request):
                 'access': str(refresh.access_token),
                 'refresh': str(refresh),
                 'name': user.name,
-                'employee_number': user.employee_number
+                'employee_number': user.employee_number,
+                'department_code': user.department_code
             })
         else:
             #사용자 없음

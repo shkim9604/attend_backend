@@ -385,68 +385,69 @@ def check_out(request):
 
 
 #직원 자기출퇴근조회
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
 def employee_self_attend_check(request):
-    if request.method == "POST":
-        data = json.loads(request.body)
-        name = data.get('name','')
-        employee_number = data.get('employee_number')
-        code = User.objects.filter(name=name, employee_number=employee_number).first()
-        code = code.department_code
-        end_date =  timezone.now(),date() + timedelta(days=1)
-        start_date = end_date - timedelta(days=7)
+    user = request.user  # 토큰에서 인증된 사용자
+    data = request.data
+    end_date =  timezone.now(),date() + timedelta(days=1)
+    start_date = end_date - timedelta(days=7)
 
-        #코드를 통해 임직원의 직책을 알고 직책에 따라 조회할수있는 범위가 달라짐
-        #예) 사업1팀 팀장은 팀장본인것은 물런이고 사업팀 직원들의 출퇴근도 조회가능
-        if code == 200:
-            query = Q(department_code__in=[200,210,211,300])
-        elif code == 210:
-            query = Q(department_code__in=[210,211])
-        elif code == 300:
-            query = Q(department_code__in=[300,310,311,320,321])
-        elif code == 310:
-            query = Q(department_code__in=[310,311])
-        elif code == 320:
-            query = Q(department_code__in=[320,321])
-        elif code == 400:
-            query = Q(department_code_in=[400,410,411])
-        elif code == 410:
-            query = Q(department_code_in=[410,411])
-        else:
-            query = Q()#조건이 없으면 빈쿼리
-        excluded_fields = ['business_start_place', 'business_end_place']
-        data = []
-        if query:
-            users = User.objects.filter(query)
-            for user in users:
-                attendance_data = Attendance.objects.filter(name=user.name,employee_number=user.employee_number,check_date__range=[start_date, end_date]).order_by('-check_date', '-created_time').values()
-                for record in attendance_data:
-                    filtered_record = {}
-                    for k, v in record.items():
-                        if k not in excluded_fields:
-                            filtered_record[k] = v
-                    data.append(filtered_record)
-        else:
-            attendance_data = Attendance.objects.filter(check_date__range=[start_date, end_date]).order_by('-check_date','-created_time').values()
-            for record in attendance_data:
-                filterd_record = {}
-                for k,v in record.items():
-                    if k not in excluded_fields:
-                        filterd_record[k] = v
-                data.append(filterd_record)
-
-        return JsonResponse(data,safe=False)
+    #코드를 통해 임직원의 직책을 알고 직책에 따라 조회할수있는 범위가 달라짐
+    #예) 사업1팀 팀장은 팀장본인것은 물런이고 사업팀 직원들의 출퇴근도 조회가능
+    if user.department_code == 200:
+        query = Q(department_code__in=[200,210,211,300])
+    elif user.department_code == 210:
+        query = Q(department_code__in=[210,211])
+    elif user.department_code == 300:
+        query = Q(department_code__in=[300,310,311,320,321])
+    elif user.department_code == 310:
+        query = Q(department_code__in=[310,311])
+    elif user.department_code == 320:
+        query = Q(department_code__in=[320,321])
+    elif user.department_code == 400:
+        query = Q(department_code_in=[400,410,411])
+    elif user.department_code == 410:
+        query = Q(department_code_in=[410,411])
     else:
-        return JsonResponse({'success': False, 'message': '잘못된 요청입니다.'})
+        query = Q()#조건이 없으면 빈쿼리
+    excluded_fields = ['business_start_place', 'business_end_place']
+    data = []
+    if query:
+        users = User.objects.filter(query)
+        for user in users:
+            attendance_data = Attendance.objects.filter(name=user.name,employee_number=user.employee_number,check_date__range=[start_date, end_date]).order_by('-check_date', '-created_time').values()
+            for record in attendance_data:
+                filtered_record = {}
+                for k, v in record.items():
+                    if k not in excluded_fields:
+                        filtered_record[k] = v
+                data.append(filtered_record)
+    else:
+        attendance_data = Attendance.objects.filter(check_date__range=[start_date, end_date]).order_by('-check_date','-created_time').values()
+        for record in attendance_data:
+            filterd_record = {}
+            for k,v in record.items():
+                if k not in excluded_fields:
+                    filterd_record[k] = v
+            data.append(filterd_record)
+
+    return JsonResponse(data,safe=False)
+
 
 #관리자 출퇴근조회
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
 def admin_get_employee_attendance(request):
-    if request.method == 'GET':
-        end_date = timezone.now().date() + timedelta(days=1)
-        start_date = end_date - timedelta(days=7)
-        attendance_data = Attendance.objects.filter(check_date__range=[start_date,end_date]).order_by('-created_time').values()
-        return JsonResponse(list(attendance_data),safe=False)
-    else:
-        return JsonResponse({'success': False, 'message': '잘못된 요청입니다.'})
+    user = request.user
+    #관리자가 아니면 차단
+    if user.name != "관리자":
+        return JsonResponse({'success': False, 'message': '권한이 없습니다.'},status=403)
+    end_date = timezone.now().date() + timedelta(days=1)
+    start_date = end_date - timedelta(days=7)
+    attendance_data = Attendance.objects.filter(check_date__range=[start_date,end_date]).order_by('-created_time').values()
+    return JsonResponse(list(attendance_data),safe=False)
+
 
 #관리자 직원 출퇴근상세조회
 def admin_get_employee_attendance_detail(request):
