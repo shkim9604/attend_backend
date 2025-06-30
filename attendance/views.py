@@ -5,6 +5,7 @@ from django.http import HttpResponse
 from datetime import time, timedelta
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
 import json
 #MDB파일 관련
 from django.conf import settings
@@ -442,7 +443,7 @@ def admin_get_employee_attendance(request):
     user = request.user
     #관리자가 아니면 차단
     if user.name != "관리자":
-        return JsonResponse({'success': False, 'message': '권한이 없습니다.'},status=403)
+        return Response({'success': False, 'message': '권한이 없습니다.'},status=403)
     end_date = timezone.now().date() + timedelta(days=1)
     start_date = end_date - timedelta(days=7)
     attendance_data = Attendance.objects.filter(check_date__range=[start_date,end_date]).order_by('-created_time').values()
@@ -450,138 +451,146 @@ def admin_get_employee_attendance(request):
 
 
 #관리자 직원 출퇴근상세조회
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
 def admin_get_employee_attendance_detail(request):
-    if request.method == 'POST':
-        data = json.loads(request.body)
-        name = data.get('name','')
-        start_date = data.get('start_date','')
-        end_date = data.get('end_date','')
-        if start_date == "" and end_date == "":
-            #시작날짜와 끝날짜가 비어있으므로 7일치의 데이터를 가져온다.
-            end_date = timezone.now().date() + timedelta(days=1)
-            start_date = end_date - timedelta(days=7)
-            if name == "전직원":
-                attendance_data = Attendance.objects.filter(check_date__range=[start_date,end_date]).order_by('-created_time').values()
-                return JsonResponse(list(attendance_data), safe=False)
-            else:
-                #이름이 있으니 해당직원의 데이터를 가져온다.
-                attendance_data = Attendance.objects.filter(name=name, check_date__range=[start_date, end_date]).order_by('-created_time').values()
-                return JsonResponse(list(attendance_data), safe=False)
+    user = request.user
+    data = request.data
+    search_name = data.get('name','')
+    start_date = data.get('start_date','')
+    end_date = data.get('end_date','')
+    if start_date == "" and end_date == "":
+        #시작날짜와 끝날짜가 비어있으므로 7일치의 데이터를 가져온다.
+        end_date = timezone.now().date() + timedelta(days=1)
+        start_date = end_date - timedelta(days=7)
+        if search_name == "전직원":
+            attendance_data = Attendance.objects.filter(check_date__range=[start_date,end_date]).order_by('-created_time').values()
+            return JsonResponse(list(attendance_data), safe=False)
         else:
-            #날짜가 있으므로 해당날짜에 해당하는 데이터를 가져온다.
-            if name == "전직원":
-                attendance_data = Attendance.objects.filter(check_date__range=[start_date,end_date]).order_by('-created_time').values()
-                return JsonResponse(list(attendance_data), safe=False)
-            attendance_data = Attendance.objects.filter(name=name, check_date__range=[start_date, end_date]).order_by('-created_time').values()
+            #이름이 있으니 해당직원의 데이터를 가져온다.
+            attendance_data = Attendance.objects.filter(name=search_name, check_date__range=[start_date, end_date]).order_by('-created_time').values()
             return JsonResponse(list(attendance_data), safe=False)
     else:
-        return JsonResponse({'success': False, 'message': '잘못된 요청입니다.'})
+        #날짜가 있으므로 해당날짜에 해당하는 데이터를 가져온다.
+        if search_name == "전직원":
+            attendance_data = Attendance.objects.filter(check_date__range=[start_date,end_date]).order_by('-created_time').values()
+            return JsonResponse(list(attendance_data), safe=False)
+        attendance_data = Attendance.objects.filter(name=search_name, check_date__range=[start_date, end_date]).order_by('-created_time').values()
+        return JsonResponse(list(attendance_data), safe=False)
+
 
 
 #직원 자기출퇴근 기록 다운로드
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
 def download_employee_attendance(request):
-    if request.method == 'POST':
-        data = json.loads(request.body)
-        name = data.get('name','')
-        employee_number = data.get('employee_number','')
-        start_date = data.get('start_date','')
-        end_date = data.get('end_date','')
-        attendance_data = Attendance.objects.filter(
-            name = name,
-            employee_number = employee_number,
-            check_date__range=[start_date, end_date]
-        ).values(
-            'name', 'employee_number', 'check_date',
-            'business_start_time', 'check_in_time', 'check_out_time','buisness_end_time',
-            'check_in_place_name', 'check_in_location', 'check_out_place_name', 'check_out_location',
-            'check_in_type','check_out_type'
-        )
-        #데이터 변환
-        df = pd.DataFrame(attendance_data)
-        df['check_date'] = pd.to_datetime(df['check_date']).dt.date
+    user = request.user
+    data = request.data
+    start_date = data.get('start_date','')
+    end_date = data.get('end_date','')
+    attendance_data = Attendance.objects.filter(
+        name = user.name,
+        employee_number = user.employee_number,
+        check_date__range=[start_date, end_date]
+    ).values(
+        'name', 'employee_number', 'check_date',
+        'business_start_time', 'check_in_time', 'check_out_time','buisness_end_time',
+        'check_in_place_name', 'check_out_place_name', 'check_in_location', 'check_out_location',
+        'check_in_type','check_out_type'
+    )
+    #데이터 변환
+    df = pd.DataFrame(attendance_data)
+    df['check_date'] = pd.to_datetime(df['check_date']).dt.date
 
-        #영어로 되어있는 이름 한국어로 변경
-        df.columns = ["이름", "사원번호", "날짜", "출장출발", "출근시간", "퇴근시간", "출장복귀",
-                      "출근장소", "퇴근장소", "출근위치", "퇴근위치", "출근방식", "퇴근방식"]
-        df["조기출근"] = ""
-        df["연장근무"] = ""
+    #영어로 되어있는 이름 한국어로 변경
+    df.columns = ["이름", "사원번호", "날짜", "출장출발", "출근시간", "퇴근시간", "출장복귀",
+                  "출근장소", "퇴근장소", "출근위치", "퇴근위치", "출근방식", "퇴근방식"]
+    df["조기출근"] = ""
+    df["연장근무"] = ""
 
-        #시간값 객체로 변환
-        def clean_time(value):
-            try:
-                #시간을 pandas에서 처리 ,잘못된값은 NaT로 처리
-                return pd.to_datetime(value, format="%H:%M:%S", errors='coerce').time()
-            except Exception as e:
-                print(f"Error parsing time: {value}, Error: {e}")
-                return None
+    #시간값 객체로 변환
+    def clean_time(value):
+        try:
+            #시간을 pandas에서 처리 ,잘못된값은 NaT로 처리
+            return pd.to_datetime(value, format="%H:%M:%S", errors='coerce').time()
+        except Exception as e:
+            print(f"Error parsing time: {value}, Error: {e}")
+            return None
 
-        #출근시간 퇴근시간 클리닝
-        df['출근시간'] = df['출근시간'].apply(clean_time)
-        df['퇴근시간'] = df['퇴근시간'].apply(clean_time)
+    #출근시간 퇴근시간 클리닝
+    df['출근시간'] = df['출근시간'].apply(clean_time)
+    df['퇴근시간'] = df['퇴근시간'].apply(clean_time)
 
-        #조기출근 연장근무 계산
-        def calculate_remarks(row):
-            #조기출근 계산
-            if pd.notnull(row['출근시간']) and row['출근시간'] != datetime.strptime("00:00:00", "%H:%M:%S").time():
-                check_in_time = datetime.combine(datetime.today(), row['출근시간'])
-                early_check_time = datetime.combine(datetime.today(), datetime.strptime("08:00:00", "%H:%M").time())
-                if check_in_time >= "08:00:00":
-                    pass
-                if check_in_time < early_check_time:
-                    early_minutes = (early_check_time - check_in_time).seconds // 60
-                    row["조기출근"] = f"{early_minutes}분"
+    #조기출근 연장근무 계산
+    def calculate_remarks(row):
+        #조기출근 계산
+        if pd.notnull(row['출근시간']) and row['출근시간'] != datetime.strptime("00:00:00", "%H:%M:%S").time():
+            check_in_time = datetime.combine(datetime.today(), row['출근시간'])
+            early_check_time = datetime.combine(datetime.today(), datetime.strptime("08:00:00", "%H:%M").time())
+            if check_in_time >= "08:00:00":
+                pass
+            if check_in_time < early_check_time:
+                early_minutes = (early_check_time - check_in_time).seconds // 60
+                row["조기출근"] = f"{early_minutes}분"
 
-            #연장근무 계산
-            if pd.notnull(row['퇴근시간']):
-                check_out_time = datetime.combine(datetime.today(), row['퇴근시간'])
-                late_check_time = datetime.combine(datetime.today(), datetime.strptime('19:00',"%H:%M").time())
-                if check_out_time > late_check_time:
-                    late_minutes = (check_out_time - late_check_time).seconds // 60
-                    row["연장근무"] = f"{late_minutes}분"
+        #연장근무 계산
+        if pd.notnull(row['퇴근시간']):
+            check_out_time = datetime.combine(datetime.today(), row['퇴근시간'])
+            late_check_time = datetime.combine(datetime.today(), datetime.strptime('19:00',"%H:%M").time())
+            if check_out_time > late_check_time:
+                late_minutes = (check_out_time - late_check_time).seconds // 60
+                row["연장근무"] = f"{late_minutes}분"
 
-            return row
+        return row
 
-        df = df.apply(calculate_remarks, axis=1)
+    df = df.apply(calculate_remarks, axis=1)
 
-        #엑셀파일로 변환
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            #날짜 기준으로 월별로 데이터를 그룹화 각각시트에 기록
-            for month, group in df.groupby(df['날짜'].apply(lambda x: x.strftime("%Y-%m"))):
-                group.to_excel(writer, index=False, sheet_name=month)
+    #엑셀파일로 변환
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        #날짜 기준으로 월별로 데이터를 그룹화 각각시트에 기록
+        for month, group in df.groupby(df['날짜'].apply(lambda x: x.strftime("%Y-%m"))):
+            group.to_excel(writer, index=False, sheet_name=month)
 
-                #엑셀 워크북과 시트 가져오기
-                worksheet = writer.sheets[month]
+            #엑셀 워크북과 시트 가져오기
+            worksheet = writer.sheets[month]
 
-                #열 너비 조정
-                for col in worksheet.columns:
-                    max_length = 0
-                    column = col[0].column_letter
-                    for cell in col:
-                        try:
-                            if cell.value:
-                                max_length = max(max_length, len(str(cell.value)))
-                        except:
-                            pass
-                    width = (max_length + 4) #너비 조정(여유공간)
-                    worksheet.column_dimensions[column].width = width
+            #열 너비 조정
+            for col in worksheet.columns:
+                max_length = 0
+                column = col[0].column_letter
+                for cell in col:
+                    try:
+                        if cell.value:
+                            max_length = max(max_length, len(str(cell.value)))
+                    except:
+                        pass
+                width = (max_length + 4) #너비 조정(여유공간)
+                worksheet.column_dimensions[column].width = width
 
-        output.seek(0)
+    output.seek(0)
 
-        #파일이름설정
-        filename = quote(f"출퇴근기록_{datetime.now().strftime('%Y%m%d')}.xlsx")
-        response = HttpResponse(output, content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-        response['Content-Disposition'] = f'attachment; filename*=UTF-8\'\'{filename}'
+    #파일이름설정
+    filename = quote(f"출퇴근기록_{datetime.now().strftime('%Y%m%d')}.xlsx")
+    response = HttpResponse(output, content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    response['Content-Disposition'] = f'attachment; filename*=UTF-8\'\'{filename}'
 
-        return response
+    return response
 
 
 #전직원 출퇴근기록 엑셀 다운로드
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
 def download_all_employee_attendance(request):
+    user = request.user
+    if user.name != "관리자":
+        return Response({'success': False, 'message': '접근 권한이 없습니다.'}, status=403)
+
     attendance_data = Attendance.objects.all().values(
         'name','employee_number', 'check_date',
         'buiness_start_time', 'check_in_time', 'check_out_time', 'business_end_time',
-        'buiness_start_'
+        'check_in_place_name','check_out_place_name','check_in_location','check_out_location',
+        'check_in_type','check_out_type'
     )
 
     #데이터 변환
