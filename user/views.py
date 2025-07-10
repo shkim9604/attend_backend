@@ -95,3 +95,65 @@ def register_user(request):
         return Response({'success': True, 'message': '등록이 완료되었습니다.'})
     else:
         return Response({'success': False, 'message': '이미 등록된 직원입니다.'})
+@api_view(['PATCH'])
+@permission_classes([IsAuthenticated])
+def modify_user(request):
+    admin = request.user
+    if admin.name != "관리자":
+        return Response({'success': False, 'message': '접근 권한이 없습니다.'}, status=403)
+
+    data = request.data
+    name = data.get('name','')
+    employee_number = data.get('employee_number','')
+    phone_number = data.get('phone_number','')
+
+    target_user = None
+    user_query = Checked_User.objects.filter(name=name)
+    if user_query.exists():
+        target_user = user_query.first()
+        # 이름으로 찾았으면 사번, 전화번호만 수정
+        target_user.id_number = id_number
+        target_user.phone_number = phone_number
+        target_user.save()
+    else:
+        user_query = Checked_User.objects.filter(employee_number=employee_number)
+        if user_query.exists():
+            target_user = user_query.first()
+            # 사번으로 찾았으면 이름, 전화번호만 수정
+            target_user.name = name
+            target_user.phone_number = phone_number
+            target_user.save()
+        else:
+            user_query = Checked_User.objects.filter(phone_number=phone_number)
+            if user_query.exists():
+                target_user = user_query.first()
+                # 전화번호로 찾았으면 이름, 사번만 수정
+                target_user.name = name
+                target_user.id_number = id_number
+                target_user.save()
+            else:
+                return Response({'success': False, 'message': '해당 사용자를 찾을 수 없습니다.'}, status=404)
+    return Response({'success': True, 'message': '사용자 정보 수정 완료'})
+
+@api_view(['PATCH'])
+@permission_classes([IsAuthenticated])
+def delete_user(request):
+    admin = request.user
+    if admin.name != "관리자":
+        return Response({'success': False, 'message': '접근 권한이 없습니다.'}, status=403)
+
+    data = request.data
+    name = data.get('name', '')
+    employee_number = data.get('employee_number', '')
+    phone_number = data.get('phone_number', '')
+
+    #가입된유저목록에서 제외
+    signup_user = User.objects.filter(name=name, employee_number=employee_number)
+    if signup_user.exists():
+        signup_user.delete()
+
+    checked_user = Checked_User.objects.filter(name=name, employee_number=employee_number)
+    if checked_user.exists():
+        checked_user.delete()
+
+    return Response({'success': True, 'message': '해당 유저 삭제 처리가 완료되었습니다.'})
