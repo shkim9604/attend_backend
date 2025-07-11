@@ -21,7 +21,7 @@ from urllib.parse import quote
 import io
 #모델가져오기
 from .models import Attendance
-from ..user.models import User
+from ..user.models import User, Checked_User
 # Create your views here.
 
 #MDB파일 출근데이터 기록하기
@@ -478,6 +478,16 @@ def admin_get_employee_attendance_detail(request):
         attendance_data = Attendance.objects.filter(name=search_name, check_date__range=[start_date, end_date]).order_by('-created_time').values()
         return JsonResponse(list(attendance_data), safe=False)
 
+
+#직원 목록 조회
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_employee_list(request):
+    user = request.user
+    if user.name != "관리자":
+        return Response({'success': False, 'message': '권한이 없습니다.'},status=403)
+    employee_list = Checked_User.objects.order_by('-employee_number').values()
+    return Response(list(employee_list))
 
 
 #직원 자기출퇴근 기록 다운로드
